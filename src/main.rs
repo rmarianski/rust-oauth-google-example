@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context};
 use clap::Parser;
 use rand::{thread_rng, Rng};
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::str::from_utf8;
@@ -36,7 +36,8 @@ async fn main() -> anyhow::Result<()> {
         .as_str()
         .strip_suffix('/')
         .unwrap_or_else(|| args.redirect_url.as_str());
-    let query_string = new_query_string(&args.google_client_id, redirect_uri, &state);
+    let query_string =
+        new_query_string(&args.google_client_id, redirect_uri, &state).context("query string")?;
     let auth_redirect_url = format!("{}?{}", args.auth_url, query_string);
     println!("Google auth redirect: {}", auth_redirect_url);
 
@@ -61,7 +62,8 @@ async fn main() -> anyhow::Result<()> {
         &args.google_client_secret,
         &google_redirect_state.code,
         redirect_uri,
-    );
+    )
+    .context("new token request body")?;
     println!("posting token request body:\n{}", token_request_body);
     let token_response = http_client
         .post(&args.token_url)
@@ -117,17 +119,27 @@ fn new_state(num_bytes: u32) -> String {
     base64::encode_config(&random_bytes, base64::URL_SAFE_NO_PAD)
 }
 
-fn new_query_string(client_id: &str, redirect_uri: &str, state: &str) -> String {
-    format!(
-        "response_type=code&scope=openid%20email&client_id={}&redirect_uri={}&state={}",
-        query_encode(client_id),
-        query_encode(redirect_uri),
-        query_encode(state)
-    )
+fn new_query_string(
+    client_id: &str,
+    redirect_uri: &str,
+    state: &str,
+) -> Result<String, serde_url_params::Error> {
+    serde_url_params::to_string(&RedirectParams {
+        response_type: "code",
+        scope: "openid email",
+        client_id,
+        redirect_uri,
+        state,
+    })
 }
 
-fn query_encode(s: &str) -> String {
-    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
+#[derive(Debug, Serialize)]
+struct RedirectParams<'a> {
+    response_type: &'a str,
+    scope: &'a str,
+    client_id: &'a str,
+    redirect_uri: &'a str,
+    state: &'a str,
 }
 
 struct GoogleRedirectState {
@@ -182,12 +194,21 @@ fn new_token_request_body(
     client_secret: &str,
     code: &str,
     redirect_uri: &str,
-) -> String {
-    format!(
-        "client_id={}&client_secret={}&code={}&grant_type=authorization_code&redirect_uri={}",
-        query_encode(client_id),
-        query_encode(client_secret),
-        query_encode(code),
-        query_encode(redirect_uri)
-    )
+) -> Result<String, serde_url_params::Error> {
+    serde_url_params::to_string(&TokenRequestBody {
+        client_id,
+        client_secret,
+        code,
+        redirect_uri,
+        grant_type: "authorization_code",
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct TokenRequestBody<'a> {
+    client_id: &'a str,
+    client_secret: &'a str,
+    code: &'a str,
+    redirect_uri: &'a str,
+    grant_type: &'a str,
 }
