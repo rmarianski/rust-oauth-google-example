@@ -137,47 +137,44 @@ struct GoogleRedirectState {
 
 fn recv_redirect_request(addr: &str) -> anyhow::Result<GoogleRedirectState> {
     let listener = TcpListener::bind(addr).with_context(|| format!("bind: {}", addr))?;
-    if let Some(stream) = listener.incoming().next() {
-        let mut stream = stream.context("incoming stream")?;
-        let mut reader = BufReader::new(&stream);
-        let mut request_line = String::new();
-        reader
-            .read_line(&mut request_line)
-            .context("read request line")?;
-        if !request_line.starts_with("GET ") {
-            bail!("bad redirect request line: {}", request_line);
-        }
-        let redirect_path = request_line
-            .split_whitespace()
-            .nth(1)
-            .ok_or_else(|| anyhow!("redirect path: {}", request_line))?;
-        let url = Url::parse(&(format!("http://localhost{}", redirect_path)))
-            .with_context(|| format!("parse path {}", redirect_path))?;
-        let mut code = String::new();
-        let mut state = String::new();
-        for pair in url.query_pairs() {
-            match pair.0.as_ref() {
-                "code" => code = pair.1.into(),
-                "state" => state = pair.1.into(),
-                _ => {}
-            }
-        }
-        if code.is_empty() {
-            bail!("missing code: {}", request_line);
-        }
-        if state.is_empty() {
-            bail!("missing state: {}", request_line);
-        }
-        let message = "Go back to your terminal :)";
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
-            message.len(),
-            message
-        );
-        stream.write_all(response.as_bytes()).context("write")?;
-        return Ok(GoogleRedirectState { state, code });
+    let (mut stream, _socket_addr) = listener.accept().context("accept")?;
+    let mut reader = BufReader::new(&stream);
+    let mut request_line = String::new();
+    reader
+        .read_line(&mut request_line)
+        .context("read request line")?;
+    if !request_line.starts_with("GET ") {
+        bail!("bad redirect request line: {}", request_line);
     }
-    Err(anyhow!("no listener stream"))
+    let redirect_path = request_line
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| anyhow!("redirect path: {}", request_line))?;
+    let url = Url::parse(&(format!("http://localhost{}", redirect_path)))
+        .with_context(|| format!("parse path {}", redirect_path))?;
+    let mut code = String::new();
+    let mut state = String::new();
+    for pair in url.query_pairs() {
+        match pair.0.as_ref() {
+            "code" => code = pair.1.into(),
+            "state" => state = pair.1.into(),
+            _ => {}
+        }
+    }
+    if code.is_empty() {
+        bail!("missing code: {}", request_line);
+    }
+    if state.is_empty() {
+        bail!("missing state: {}", request_line);
+    }
+    let message = "Go back to your terminal :)";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+        message.len(),
+        message
+    );
+    stream.write_all(response.as_bytes()).context("write")?;
+    Ok(GoogleRedirectState { state, code })
 }
 
 fn new_token_request_body(
