@@ -14,3 +14,4 @@ serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.17", features = ["rt", "macros", "rt-multi-thread"] }
 url = "2.2"
 serde_url_params = "0.2"
+oauth2 = "4.4.1"
